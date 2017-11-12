@@ -1,5 +1,18 @@
 import asyncdispatch, asyncnet, streams, nativesockets, strutils, tables,
-  times, oids, random
+  times, oids, random, json
+
+
+proc ntohl*(x: uint64): uint64 =
+  ## Converts 32-bit unsigned integers from network to host byte order.
+  ## On machines where the host byte order is the same as network byte order,
+  ## this is a no-op; otherwise, it performs a 4-byte swap operation.
+  when cpuEndian == bigEndian: result = x
+  else: result = (x shr 24'u32) or
+                 (x shr 8'u32 and 0xff00'u32) or
+                 (x shl 8'u32 and 0xff0000'u32) or
+                 (x shl 24'u32)
+
+
 
 type
   ProtocolError* = object of Exception
@@ -36,14 +49,15 @@ proc makeFrame*(f: Frame): string =
   var ret = newStringStream()
 
   var b0: byte = (f.opcode.byte and 0x0f)
-  b0 = b0 or (1 shl 7) # fin
+  if f.fin:
+    b0 = b0 or 128u8 # fin
 
   ret.write(byte b0)
 
   var b1: byte = 0
 
   if f.data.len <= 125: b1 = f.data.len.uint8
-  elif f.data.len > 125 and f.data.len <= 0x7fff: b1 = 126u8
+  elif f.data.len > 125 and f.data.len <= 0xffff: b1 = 126u8
   else: b1 = 127u8
 
   let b1unmasked = b1
@@ -51,10 +65,21 @@ proc makeFrame*(f: Frame): string =
 
   ret.write(byte b1)
 
-  if f.data.len > 125 and f.data.len <= 0x7fff:
-    ret.write(int16 f.data.len.int16.htons)
-  elif f.data.len > 0x7fff:
-    ret.write(int64 f.data.len.int32.htonl)
+  if f.data.len > 125 and f.data.len <= 0xffff:
+    ret.write(uint16 f.data.len.uint16.htons)
+  elif f.data.len > 0xffff:
+    var len = f.data.len
+    ret.write char((len shr 56) and 255)
+    ret.write char((len shr 48) and 255)
+    ret.write char((len shr 40) and 255)
+    ret.write char((len shr 32) and 255)
+    ret.write char((len shr 24) and 255)
+    ret.write char((len shr 16) and 255)
+    ret.write char((len shr 8) and 255)
+    ret.write char(len and 255)
+
+    #ret.write(uint32 0)
+    #ret.write(uint32 f.data.len.uint32.htonl)
 
   var data = f.data
 
@@ -72,12 +97,12 @@ proc makeFrame*(f: Frame): string =
   ret.setPosition(0)
   result = ret.readAll()
 
-  assert(result.len == (
-    2 +
-    (if f.masked: 4 else: 0) +
-    (if b1unmasked == 126u8: 2 elif b1unmasked == 127u8: 8 else: 0) +
-    data.len
-  ))
+  #assert(result.len == (
+  #  2 +
+  #  (if f.masked: 4 else: 0) +
+  #  (if b1unmasked == 126u8: 2 elif b1unmasked == 127u8: 8 else: 0) +
+  #  data.len
+  #))
 
 proc makeFrame*(opcode: Opcode, data: string, masked: bool): string =
   ## A convenience shorthand.
@@ -176,13 +201,9 @@ proc readData*(ws: AsyncSocket, isClientSocket: bool):
     case f.opcode
       of Opcode.Close:
         # handle case: ping never arrives and client closes the connection
-        let ex = newException(IOError, "socket closed by remote peer")
-
         if reqPing.hasKey(ws.getFD().AsyncFD.int):
-          reqPing[ws.getFD().AsyncFD.int].fail(ex)
           reqPing.del(ws.getFD().AsyncFD.int)
-
-        raise ex
+        return (Opcode.Close, "")
 
       of Opcode.Ping:
         await ws.send(makeFrame(Opcode.Pong, f.data, isClientSocket))
@@ -203,7 +224,7 @@ proc readData*(ws: AsyncSocket, isClientSocket: bool):
 
       else:
         ws.close()
-        raise newException(ProtocolError, "received invalid opcode: " & $f.opcode)
+        return (Opcode.Close, "")
 
     result = (resultOpcode, resultData)
     return

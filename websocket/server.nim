@@ -75,11 +75,11 @@ proc verifyWebsocketRequest*(req: Request, protocol = ""):
   let cliWantsProt = req.headers.hasKey("sec-websocket-protocol")
 
   if cliWantsProt and protocol == "":
-    result = ( false, "server does not support protocol negotiation" )
+    result = (false, "server does not support protocol negotiation")
     return
 
   if (not cliwantsProt) and protocol != "":
-    result = ( false, "no protocol advertised, but server demands `" & protocol & "`" )
+    result = (false, "no protocol advertised, but server demands `" & protocol & "`")
     return
 
   if cliwantsProt and protocol != "":
@@ -87,7 +87,7 @@ proc verifyWebsocketRequest*(req: Request, protocol = ""):
       mapIt(it.strip.tolower)
 
     if wants.find(protocol.tolower) == -1:
-      result = ( false, "no advertised protocol supported; server speaks `" & $protocol & "`" )
+      result = (false, "no advertised protocol supported; server speaks `" & $protocol & "`")
       return
 
   let sh = secureHash(req.headers["sec-websocket-key"] &
@@ -98,8 +98,8 @@ proc verifyWebsocketRequest*(req: Request, protocol = ""):
   await req.client.send("Sec-Websocket-Accept: " & acceptKey & "\c\L")
   await req.client.send("Connection: Upgrade\c\L")
   await req.client.send("Upgrade: websocket\c\L")
-  if protocol != "": await req.client.send("Sec-Websocket-Protocol: " & protocol & "\c\L")
+  if protocol != "":
+    await req.client.send("Sec-Websocket-Protocol: " & protocol & "\c\L")
   await req.client.send("\c\L")
 
-  result = ( true, "" )
-
+  result = (true, "")
