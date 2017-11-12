@@ -2,18 +2,6 @@ import asyncdispatch, asyncnet, streams, nativesockets, strutils, tables,
   times, oids, random, json
 
 
-proc ntohl*(x: uint64): uint64 =
-  ## Converts 32-bit unsigned integers from network to host byte order.
-  ## On machines where the host byte order is the same as network byte order,
-  ## this is a no-op; otherwise, it performs a 4-byte swap operation.
-  when cpuEndian == bigEndian: result = x
-  else: result = (x shr 24'u32) or
-                 (x shr 8'u32 and 0xff00'u32) or
-                 (x shl 8'u32 and 0xff0000'u32) or
-                 (x shl 24'u32)
-
-
-
 type
   ProtocolError* = object of Exception
 
@@ -78,9 +66,6 @@ proc makeFrame*(f: Frame): string =
     ret.write char((len shr 8) and 255)
     ret.write char(len and 255)
 
-    #ret.write(uint32 0)
-    #ret.write(uint32 f.data.len.uint32.htonl)
-
   var data = f.data
 
   if f.masked:
@@ -97,12 +82,6 @@ proc makeFrame*(f: Frame): string =
   ret.setPosition(0)
   result = ret.readAll()
 
-  #assert(result.len == (
-  #  2 +
-  #  (if f.masked: 4 else: 0) +
-  #  (if b1unmasked == 126u8: 2 elif b1unmasked == 127u8: 8 else: 0) +
-  #  data.len
-  #))
 
 proc makeFrame*(opcode: Opcode, data: string, masked: bool): string =
   ## A convenience shorthand.
